@@ -1,5 +1,5 @@
 # Graph Few-shot Class Incremental Learning (GFCIL)
-![plot](./frame_model.png)
+![Alt text](./frame_model.png)
 ## Requirements
 `python==3.7.10`
 `pytorch==1.8.1`
