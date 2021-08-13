@@ -1,8 +1,8 @@
 # Graph Few-shot Class Incremental Learning (GFCIL)
 ## Requirements
-`python==3.7.10`
-`pytorch==1.8.1`
-`cuda=11.1`
+`python==3.7.10`\\
+`pytorch==1.8.1`\\
+`cuda=11.1`\\
 `tqdm==4.59.0`
 ## Useage
 ### Pretrain
