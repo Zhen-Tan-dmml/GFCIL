@@ -77,11 +77,11 @@ if args.ER:
     print("Memory load successfully!")
 
 # Model and optimizer
-encoder = GPN_Encoder(nfeat=features.shape[1],
+encoder = GNN_Encoder(nfeat=features.shape[1],
             nhid=args.hidden,
             dropout=args.dropout)
 
-scorer = GPN_Valuator(nfeat=features.shape[1],
+scorer = GNN_Valuator(nfeat=features.shape[1],
             nhid=args.hidden,
             dropout=args.dropout)
 if args.attention:

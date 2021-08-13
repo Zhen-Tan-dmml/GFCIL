@@ -67,7 +67,7 @@ save_object(cache, cache_path)
 del cache
 
 # Model and optimizer
-encoder = GPN_Encoder(nfeat=features.shape[1],
+encoder =GNN_Encoder(nfeat=features.shape[1],
             nhid=args.hidden,
             dropout=args.dropout)
 

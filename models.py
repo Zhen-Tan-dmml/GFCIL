@@ -4,9 +4,9 @@ import torch
 from layers import GraphConvolution
 
 
-class GPN_Encoder(nn.Module):
+class GNN_Encoder(nn.Module):
     def __init__(self, nfeat, nhid, dropout):
-        super(GPN_Encoder, self).__init__()
+        super(GNN_Encoder, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, 2 * nhid)
         self.gc2 = GraphConvolution(2 * nhid, nhid)
@@ -19,9 +19,9 @@ class GPN_Encoder(nn.Module):
         return x
 
 
-class GPN_Valuator(nn.Module):
+class GNN_Valuator(nn.Module):
     def __init__(self, nfeat, nhid, dropout):
-        super(GPN_Valuator, self).__init__()
+        super(GNN_Valuator, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, 2 * nhid)
         self.gc2 = GraphConvolution(2 * nhid, nhid)
