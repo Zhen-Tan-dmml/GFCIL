@@ -11,4 +11,4 @@
 ### Pretrain
 `python pretrain.py --use_cuda --dataset Amazon_clothing --seed 1234` 
 ### Meta-train and Evaluation
-`python meta-train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --attention --checkpoint 100 --way 5 --shot 5`
+`python meta-train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --checkpoint 100 --way 5 --shot 5`
