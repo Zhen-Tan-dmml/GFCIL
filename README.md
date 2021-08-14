@@ -8,6 +8,8 @@
 
 `tqdm==4.59.0`
 ## Useage
+### Go to the directory
+`cd incremental`
 ### Pretrain
 `python pretrain.py --use_cuda --dataset Amazon_clothing --seed 1234` 
 ### Meta-train and Evaluation
