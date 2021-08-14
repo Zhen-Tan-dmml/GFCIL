@@ -38,8 +38,6 @@ parser.add_argument('--shot', type=int, default=5, help='shot.')
 parser.add_argument('--qry', type=int, help='k shot for query set', default=20)
 parser.add_argument('--dataset', default='Amazon_clothing', help='Dataset:Amazon_clothing/reddit/dblp')
 parser.add_argument('--checkpoint', required=True, help='Pretrain model checkpoint number.')
-parser.add_argument('--ER', action='store_true', help='Use memory for ER')
-parser.add_argument('--attention', action='store_true', help='Use task attention')
 
 args = parser.parse_args()
 args.cuda = args.use_cuda and torch.cuda.is_available()
@@ -70,12 +68,6 @@ base_test_id = cache["base_test_id"]
 
 novel_train_id, novel_dev_id, novel_test_id = split_novel_data(novel_id)
 
-# load memory
-if args.ER:
-    memory_path = os.path.join("./memory", (str(args.dataset) + "_" + args.checkpoint + ".pkl"))
-    memory = load_object(memory_path)
-    print("Memory load successfully!")
-
 # Model and optimizer
 encoder = GNN_Encoder(nfeat=features.shape[1],
             nhid=args.hidden,
@@ -84,8 +76,8 @@ encoder = GNN_Encoder(nfeat=features.shape[1],
 scorer = GNN_Valuator(nfeat=features.shape[1],
             nhid=args.hidden,
             dropout=args.dropout)
-if args.attention:
-    attention = Attention(len(base_id), args.way, args.dropout)
+
+attention = Attention(len(base_id), args.way, args.dropout)
 
 # classifier = Classifier(nhid=args.hidden, nclass=len(base_id))
 
@@ -100,15 +92,13 @@ optimizer_encoder = optim.Adam(encoder.parameters(),
 optimizer_scorer = optim.Adam(scorer.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
-if args.attention:
-    optimizer_attention = optim.Adam(attention.parameters(),
+optimizer_attention = optim.Adam(attention.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
 if args.cuda:
     encoder.cuda()
     scorer.cuda()
-    if args.attention:
-        attention.cuda()
+    attention.cuda()
     # classifier.cuda()
     features = features.cuda()
     adj = adj.cuda()
@@ -132,8 +122,7 @@ def get_base_prototype(id_by_class):
 def incremental_train(base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot):
     encoder.train()
     scorer.train()
-    if args.attention:
-        attention.train()
+    attention.train()
 
     base_prototype_embeddings = get_base_prototype(id_by_class)[base_class_selected]
 
@@ -180,34 +169,31 @@ def incremental_train(base_id_query, novel_id_query, novel_id_support, base_clas
     labels_new = torch.cat((base_labels_new, tmp_novel_labels_new))
     del tmp_novel_labels_new
 
-    if args.attention:
-        # Compute attentions
-        base_prototype = torch.unsqueeze(base_prototype_embeddings[: len(base_id)], 0).permute(0, 2, 1)
-        seen_tasks = (len(base_prototype_embeddings) - len(base_id)) // args.way
-        if seen_tasks:
-            seen_prototype = base_prototype_embeddings[len(base_id):].view(seen_tasks, -1, args.way)
-        else:
-            seen_prototype = None
-        novel_prototype = torch.unsqueeze(novel_prototype_embeddings, 0).permute(0, 2, 1)
-        atts = attention(base_prototype, seen_prototype, novel_prototype)
-        loss_weight = torch.zeros((labels_new[-1] + 1,))
-        loss_weight[: len(base_id)] = atts[0] / len(base_id)
-        i = 1
-        while i < atts.size(0):
-            loss_weight[len(base_id) + (i - 1) * args.way: len(base_id) + i * args.way] = atts[i] / args.way
-            i += 1
+    # Compute attentions
+    base_prototype = torch.unsqueeze(base_prototype_embeddings[: len(base_id)], 0).permute(0, 2, 1)
+    seen_tasks = (len(base_prototype_embeddings) - len(base_id)) // args.way
+    if seen_tasks:
+        seen_prototype = base_prototype_embeddings[len(base_id):].view(seen_tasks, -1, args.way)
+    else:
+        seen_prototype = None
+    novel_prototype = torch.unsqueeze(novel_prototype_embeddings, 0).permute(0, 2, 1)
+    atts = attention(base_prototype, seen_prototype, novel_prototype)
+    loss_weight = torch.zeros((labels_new[-1] + 1,))
+    loss_weight[: len(base_id)] = atts[0] / len(base_id)
+    i = 1
+    while i < atts.size(0):
+        loss_weight[len(base_id) + (i - 1) * args.way: len(base_id) + i * args.way] = atts[i] / args.way
+        i += 1
 
     if args.cuda:
         labels_new = labels_new.cuda()
         # base_labels_new = base_labels_new.cuda()
         novel_labels_new = novel_labels_new.cuda()
-        if args.attention:
-            loss_weight = loss_weight.cuda()
+        loss_weight = loss_weight.cuda()
 
-    if args.attention:
-        loss_train = NLLLoss(output, labels_new, loss_weight) + NLLLoss(output, labels_new)
-    else:
-        loss_train = NLLLoss(output, labels_new)
+
+    loss_train = NLLLoss(output, labels_new, loss_weight) + NLLLoss(output, labels_new)
+
 
     # loss_train_base = F.nll_loss(base_output, base_labels_new)
     loss_train_novel = NLLLoss(novel_output, novel_labels_new)
@@ -219,8 +205,7 @@ def incremental_train(base_id_query, novel_id_query, novel_id_support, base_clas
     loss_train_all.backward()
     optimizer_encoder.step()
     optimizer_scorer.step()
-    if args.attention:
-        optimizer_attention.step()
+    optimizer_attention.step()
 
     if args.cuda:
         output = output.cpu().detach()
@@ -423,13 +408,10 @@ if __name__ == '__main__':
                 task_generator(id_by_class, novel_train_id, n_way, k_shot, m_query)
             acc_train, f1_train = train(novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot)
         else:
-            if not args.ER:
-                base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
-                    incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left)
+            base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
+                incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left)
 
-            else:
-                base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
-                    incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left, memory)
+            
             acc_train, f1_train = incremental_train(base_id_query, novel_id_query,
                                             novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot)
         all_base_class_selected.extend(novel_class_selected)
