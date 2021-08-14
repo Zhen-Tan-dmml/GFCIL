@@ -1,4 +1,4 @@
-# Graph Few-shot Class Incremental Learning (GFCIL)
+# Graph Few-shot Class-incremental Learning (Graph FCL)
 ## Requirements
 `python==3.7.10`
 
