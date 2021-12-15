@@ -13,5 +13,7 @@
 ### Pretrain
 `python pretrain.py --use_cuda --dataset Amazon_clothing` 
 ### Meta-train and Evaluation 
-`python meta_train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --checkpoint 100 --way 3 --shot 5`
+`python meta_train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --checkpoint 100 --way 3` 
+
+
 You may need to change the pretraining checkpoint number according to your need.
