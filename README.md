@@ -1,4 +1,4 @@
-# Graph Few-shot Class-incremental Learning (Graph FCL)
+# Graph Few-shot Class-incremental Learning (WSDM 2022)
 ![Alt text](frame.png)
 ## Requirements
 `python==3.7.10`
