@@ -16,7 +16,7 @@ from models import *
 parser = argparse.ArgumentParser()
 parser.add_argument('--use_cuda', action='store_true', help='Enable CUDA training.')
 parser.add_argument('--seed', type=int, default=1234, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=1000,
+parser.add_argument('--epochs', type=int, default=2000,
                     help='Number of epochs to train.')
 parser.add_argument('--lr', type=float, default=0.005,
                     help='Initial learning rate.')
@@ -51,14 +51,18 @@ if args.cuda:
 
 # Load data
 dataset = args.dataset
-adj, features, labels, degrees, id_by_class, base_id, novel_id, num_nodes = load_raw_data(dataset)
+adj, features, labels, degrees, id_by_class, base_id, novel_id, num_nodes, num_all_nodes = load_raw_data(dataset)
+novel_train_id, novel_test_id = split_novel_data(novel_id, dataset)
+pretrain_id = base_id + novel_train_id
 pretrain_idx, predev_idx, pretest_idx, base_train_label, base_dev_label, base_test_label,\
-                                base_train_id, base_dev_id, base_test_id = split_base_data(base_id, id_by_class, labels)
+                                base_train_id, base_dev_id, base_test_id = split_base_data(pretrain_id, id_by_class, labels)
+pretrain_adj = get_base_adj(adj, pretrain_id, labels)
 
-cache = {"pretrain_seed": args.seed,"adj": adj, "features": features, "labels": labels,
+cache = {"pretrain_seed": args.seed, "adj": adj, "features": features, "labels": labels, "pretrain_adj": pretrain_adj,
          "degrees": degrees, "id_by_class": id_by_class, "base_id": base_id,
-         "novel_id": novel_id, "num_nodes": num_nodes,
-         "base_train_id": base_train_id, "base_dev_id": base_dev_id, "base_test_id": base_test_id}
+         "novel_id": novel_id, "num_nodes": num_nodes, "num_all_nodes": num_all_nodes,
+         "base_train_id": base_train_id, "base_dev_id": base_dev_id, "base_test_id": base_test_id,
+         "novel_train_id": novel_train_id, "novel_test_id": novel_test_id}
 
 cache_path = os.path.join("./cache", (str(args.dataset) + ".pkl"))
 if not os.path.exists("./cache"):
@@ -67,11 +71,11 @@ save_object(cache, cache_path)
 del cache
 
 # Model and optimizer
-encoder =GNN_Encoder(nfeat=features.shape[1],
+encoder = GNN_Encoder(nfeat=features.shape[1],
             nhid=args.hidden,
             dropout=args.dropout)
 
-classifier = Classifier(nhid=args.hidden, nclass=len(base_id))
+classifier = Classifier(nhid=args.hidden, nclass=len(pretrain_id))
 
 
 optimizer_encoder = optim.Adam(encoder.parameters(),
@@ -81,7 +85,7 @@ optimizer_classifier = optim.Adam(encoder.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
 if args.pretrain_model:
-    checkpoint = torch.load(pretrain_model)
+    checkpoint = torch.load(args.pretrain_model)
     encoder.load_state_dict(checkpoint['encoder_state_dict'])
     classifier.load_state_dict(checkpoint['classifier_state_dict'])
     optimizer_encoder.load_state_dict(checkpoint['optimizer_encoder_state_dict'])
@@ -89,11 +93,13 @@ if args.pretrain_model:
     epoch = checkpoint['epoch']
     # loss = checkpoint['loss']
 
+
 if args.cuda:
     encoder.cuda()
     classifier.cuda()
     features = features.cuda()
-    adj = adj.cuda()
+    # adj = adj.cuda()
+    pretrain_adj = pretrain_adj.cuda()
     labels = labels.cuda()
     degrees = degrees.cuda()
 
@@ -102,11 +108,11 @@ def pretrain_epoch(pretrain_idx):
     encoder.train()
     classifier.train()
     optimizer_encoder.zero_grad()
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, pretrain_adj)
     output = classifier(embeddings)[pretrain_idx]
     output = F.log_softmax(-output, dim=1)
 
-    labels_new = torch.LongTensor([base_id.index(i) for i in labels[pretrain_idx]])
+    labels_new = torch.LongTensor([pretrain_id.index(i) for i in labels[pretrain_idx]])
     if args.cuda:
         labels_new = labels_new.cuda()
     loss_train = F.nll_loss(output, labels_new)
@@ -126,11 +132,11 @@ def pretrain_epoch(pretrain_idx):
 def pretest_epoch(pretest_idx):
     encoder.eval()
     classifier.eval()
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, pretrain_adj)
     output = classifier(embeddings)[pretest_idx]
     output = F.log_softmax(-output, dim=1)
 
-    labels_new = torch.LongTensor([base_id.index(i) for i in labels[pretest_idx]])
+    labels_new = torch.LongTensor([pretrain_id.index(i) for i in labels[pretest_idx]])
     if args.cuda:
         labels_new = labels_new.cuda()
     loss_test = F.nll_loss(output, labels_new)
@@ -172,7 +178,6 @@ if __name__ == '__main__':
                                                                         np.array(pre_dev_f1).mean(axis=0)))
             if curr_dev_acc > best_dev_acc:
                 best_dev_acc = curr_dev_acc
-                best_epoch = epoch
                 save_path = os.path.join(args.output_path, dataset, str(args.seed) + "_" + (str(epoch) + ".pth"))
                 tolerate = 0
                 torch.save({
@@ -184,6 +189,7 @@ if __name__ == '__main__':
                     # 'loss': loss,
                 }, save_path)
                 print("model saved at " + save_path)
+                best_epoch = epoch
             else:
                 tolerate += 1
                 if tolerate > args.lazy:

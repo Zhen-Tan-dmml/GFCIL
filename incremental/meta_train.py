@@ -29,9 +29,6 @@ parser.add_argument('--hidden', type=int, default=16,
                     help='Number of hidden units.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Dropout rate (1 - keep probability).')
-
-parser.add_argument('--get_base_prototype', action='store_true', help='Whether to get prototype or not.')
-parser.add_argument('--base_prototype_path', default='./prototype', help='Path to load/save base class prototype.')
 parser.add_argument('--incremental', action='store_true', help='Enable incremental training.')
 parser.add_argument('--way', type=int, default=5, help='way.')
 parser.add_argument('--shot', type=int, default=5, help='shot.')
@@ -55,6 +52,7 @@ cache = load_object(cache_path)
 
 pretrain_seed = cache["pretrain_seed"]
 adj = cache["adj"]
+base_adj = cache["pretrain_adj"]
 features = cache["features"]
 labels = cache["labels"]
 degrees = cache["degrees"]
@@ -65,8 +63,9 @@ base_id = cache["base_id"]
 base_train_id = cache["base_train_id"]
 base_dev_id = cache["base_dev_id"]
 base_test_id = cache["base_test_id"]
+novel_train_id  =cache["novel_train_id"]
+novel_test_id = cache["novel_test_id"]
 
-novel_train_id, novel_dev_id, novel_test_id = split_novel_data(novel_id)
 
 # Model and optimizer
 encoder = GNN_Encoder(nfeat=features.shape[1],
@@ -79,7 +78,6 @@ scorer = GNN_Valuator(nfeat=features.shape[1],
 
 attention = Attention(len(base_id), args.way, args.dropout)
 
-# classifier = Classifier(nhid=args.hidden, nclass=len(base_id))
 
 pretrain_path = os.path.join("pretrain_model", dataset, str(pretrain_seed) + "_" +args.checkpoint + ".pth")
 checkpoint = torch.load(pretrain_path)
@@ -99,16 +97,16 @@ if args.cuda:
     encoder.cuda()
     scorer.cuda()
     attention.cuda()
-    # classifier.cuda()
     features = features.cuda()
     adj = adj.cuda()
+    base_adj = base_adj.cuda()
     labels = labels.cuda()
     degrees = degrees.cuda()
 
 
-def get_base_prototype(id_by_class):
+def get_base_prototype(id_by_class, curr_adj):
 
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, curr_adj)
     z_dim = embeddings.size()[1]
     base_prototype = torch.zeros((len(id_by_class), z_dim))
 
@@ -119,21 +117,22 @@ def get_base_prototype(id_by_class):
     return base_prototype
 
 
-def incremental_train(base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot):
+def incremental_train(curr_adj, base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot):
     encoder.train()
     scorer.train()
     attention.train()
 
-    base_prototype_embeddings = get_base_prototype(id_by_class)[base_class_selected]
+    base_prototype_embeddings = get_base_prototype(id_by_class, curr_adj)[base_class_selected]
 
     if args.cuda:
         base_prototype_embeddings = base_prototype_embeddings.cuda()
 
     optimizer_encoder.zero_grad()
     optimizer_scorer.zero_grad()
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, curr_adj)
     z_dim = embeddings.size()[1]
-    scores = scorer(features, adj)
+    z_dim = embeddings.size()[1]
+    scores = scorer(features, curr_adj)
 
     # embedding lookup
     novel_support_embeddings = embeddings[novel_id_support]
@@ -191,9 +190,7 @@ def incremental_train(base_id_query, novel_id_query, novel_id_support, base_clas
         novel_labels_new = novel_labels_new.cuda()
         loss_weight = loss_weight.cuda()
 
-
     loss_train = NLLLoss(output, labels_new, loss_weight) + NLLLoss(output, labels_new)
-
 
     # loss_train_base = F.nll_loss(base_output, base_labels_new)
     loss_train_novel = NLLLoss(novel_output, novel_labels_new)
@@ -211,36 +208,24 @@ def incremental_train(base_id_query, novel_id_query, novel_id_support, base_clas
         output = output.cpu().detach()
         labels_new = labels_new.cpu().detach()
 
-        # base_output = base_output.cpu().detach()
-        # base_labels_new = base_labels_new.cpu().detach()
-        #
-        # novel_output = novel_output.cpu().detach()
-        # novel_labels_new = novel_labels_new.cpu().detach()
-
     acc_train = accuracy(output, labels_new)
     f1_train = f1(output, labels_new)
-
-    # base_acc_test = accuracy(base_output, base_labels_new)
-    # base_f1_test = f1(base_output, base_labels_new)
-    #
-    # novel_acc_test = accuracy(novel_output, novel_labels_new)
-    # novel_f1_test = f1(novel_output, novel_labels_new)
 
     return acc_train, f1_train
 
 
-def incremental_test(base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot):
+def incremental_test(curr_adj, base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot):
 
     encoder.eval()
     scorer.eval()
 
-    base_prototype_embeddings = get_base_prototype(id_by_class)[base_class_selected]
+    base_prototype_embeddings = get_base_prototype(id_by_class, curr_adj)[base_class_selected]
     if args.cuda:
         base_prototype_embeddings = base_prototype_embeddings.cuda()
 
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, curr_adj)
     z_dim = embeddings.size()[1]
-    scores = scorer(features, adj)
+    scores = scorer(features, curr_adj)
 
     # embedding lookup
     novel_support_embeddings = embeddings[novel_id_support]
@@ -302,14 +287,14 @@ def incremental_test(base_id_query, novel_id_query, novel_id_support, base_class
     return acc_test, f1_test, base_acc_test, base_f1_test, novel_acc_test, novel_f1_test
 
 
-def train(novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot):
+def train(curr_adj, novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot):
     encoder.train()
     scorer.train()
     optimizer_encoder.zero_grad()
     optimizer_scorer.zero_grad()
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, curr_adj)
     z_dim = embeddings.size()[1]
-    scores = scorer(features, adj)
+    scores = scorer(features, curr_adj)
 
     # embedding lookup
     novel_support_embeddings = embeddings[novel_id_support]
@@ -346,13 +331,13 @@ def train(novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot)
     return acc_train, f1_train
 
 
-def test(pretrain_class_selected, pretrain_id_support, pretrain_id_query, n_way, k_shot):
+def test(curr_adj, pretrain_class_selected, pretrain_id_support, pretrain_id_query, n_way, k_shot):
     encoder.eval()
     scorer.eval()
 
-    embeddings = encoder(features, adj)
+    embeddings = encoder(features, curr_adj)
     z_dim = embeddings.size()[1]
-    scores = scorer(features, adj)
+    scores = scorer(features, curr_adj)
 
     # embedding lookup
     pretrain_support_embeddings = embeddings[pretrain_id_support]
@@ -391,7 +376,6 @@ if __name__ == '__main__':
     k_shot = args.shot
     m_query = args.qry
     meta_test_num = 10
-    meta_valid_num = 10
     pretrain_test_num = 10
 
     # Train model
@@ -403,54 +387,29 @@ if __name__ == '__main__':
 
     pretrain_test_pool = [task_generator(id_by_class, base_id, n_way, k_shot, m_query) for i in range(pretrain_test_num)]
     for episode in range(args.episodes):
-        if not args.incremental:
+        if args.incremental:
+            base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
+                        incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left)
+
+            acc_train, f1_train = incremental_train(base_adj, base_id_query, novel_id_query,
+                                                novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot)
+        else:
             novel_id_support, novel_id_query, novel_class_selected = \
                 task_generator(id_by_class, novel_train_id, n_way, k_shot, m_query)
-            acc_train, f1_train = train(novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot)
-        else:
-            base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
-                incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left)
+            acc_train, f1_train = train(base_adj, novel_class_selected, novel_id_support, novel_id_query, n_way, k_shot)
 
-            
-            acc_train, f1_train = incremental_train(base_id_query, novel_id_query,
-                                            novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot)
         all_base_class_selected.extend(novel_class_selected)
         novel_class_left = list(set(novel_class_left) - set(novel_class_selected))
         meta_train_acc.append(acc_train)
 
         if episode > 0 and episode % 10 == 0:
 
-            # Sampling a pool of tasks for validation/testing
-            # valid_pool = [incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_dev_id, None, True) for i
-            #               in range(meta_valid_num)]
-            test_pool = [incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_test_id, None) for i
+            # Sampling a pool of tasks for testing
+            test_pool = [incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_train_id) for i
                          in range(meta_test_num)]
             print("-------Episode {}-------".format(episode))
             print("Meta-Train_Accuracy: {}".format(np.array(meta_train_acc).mean(axis=0)))
 
-            # # validation
-            # meta_test_acc = []
-            # meta_test_f1 = []
-            # meta_base_test_acc = []
-            # meta_base_test_f1 = []
-            # meta_novel_test_acc = []
-            # meta_novel_test_f1 = []
-            # for idx in range(meta_valid_num):
-            #     base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = valid_pool[idx]
-            #     acc_test, f1_test, base_acc_test, base_f1_test, novel_acc_test, novel_f1_test = \
-            #         incremental_test(base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot)
-            #     meta_test_acc.append(acc_test)
-            #     meta_test_f1.append(f1_test)
-            #     meta_base_test_acc.append(base_acc_test)
-            #     meta_base_test_f1.append(base_f1_test)
-            #     meta_novel_test_acc.append(novel_acc_test)
-            #     meta_novel_test_f1.append(novel_f1_test)
-            # print("Meta base valid_Accuracy: {}, Meta base valid_F1: {}".format(np.array(meta_base_test_acc).mean(axis=0),
-            #                                                             np.array(meta_base_test_f1).mean(axis=0)))
-            # print("Meta novel valid_Accuracy: {}, Meta novel valid_F1: {}".format(np.array(meta_novel_test_acc).mean(axis=0),
-            #                                                           np.array(meta_novel_test_f1).mean(axis=0)))
-            # print("Meta valid_Accuracy: {}, Meta valid_F1: {}".format(np.array(meta_test_acc).mean(axis=0),
-            #                                                           np.array(meta_test_f1).mean(axis=0)))
             # testing
             meta_test_acc = []
             meta_test_f1 = []
@@ -461,7 +420,7 @@ if __name__ == '__main__':
             for idx in range(meta_test_num):
                 base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = test_pool[idx]
                 acc_test, f1_test, base_acc_test, base_f1_test, novel_acc_test, novel_f1_test = \
-                    incremental_test(base_id_query, novel_id_query, novel_id_support,
+                    incremental_test(base_adj, base_id_query, novel_id_query, novel_id_support,
                                      base_class_selected, novel_class_selected, n_way, k_shot)
                 meta_test_acc.append(acc_test)
                 meta_test_f1.append(f1_test)
@@ -475,19 +434,7 @@ if __name__ == '__main__':
                                                                             np.array(meta_novel_test_f1).mean(axis=0)))
             print("Meta test_Accuracy: {}, Meta test_F1: {}".format(np.array(meta_test_acc).mean(axis=0),
                                                                     np.array(meta_test_f1).mean(axis=0)))
-            # pretrain testing
-            pretrain_test_acc = []
-            pretrain_test_f1 = []
 
-            for idx in range(pretrain_test_num):
-                pretrain_id_support, pretrain_id_query, pretrain_class_selected = pretrain_test_pool[idx]
-                pretrain_acc_test, pretrain_f1_test = \
-                    test(pretrain_class_selected, pretrain_id_support, pretrain_id_query, n_way, k_shot)
-                pretrain_test_acc.append(pretrain_acc_test)
-                pretrain_test_f1.append(pretrain_f1_test)
-
-            print("Pretrain test_Accuracy: {}, Pretrain test_F1: {}".format(np.array(pretrain_test_acc).mean(axis=0),
-                                                                              np.array(pretrain_test_f1).mean(axis=0)))
         if len(novel_class_left) < n_way:
 
             all_base_class_selected = deepcopy(base_id)
@@ -496,38 +443,23 @@ if __name__ == '__main__':
     #final test
     meta_test_acc = []
     meta_test_f1 = []
-    all_base_class_selected = deepcopy(base_id)
+    all_base_class_selected = deepcopy(base_id + novel_train_id)
     novel_class_left = deepcopy(novel_test_id)
-
-    embeddings = encoder(features, adj)
-    d = {}
-    d["x"] = embeddings
-    d["y"] = labels
-    save_object(d, "./trained.pkl")
 
     for idx in range(meta_test_num):
         base_id_query, novel_id_query, novel_id_support, base_class_selected, novel_class_selected = \
             incremental_task_generator(id_by_class, n_way, k_shot, m_query, all_base_class_selected, novel_class_left)
-        acc_test, f1_test = incremental_train(base_id_query, novel_id_query,
-                                                novel_id_support, base_class_selected, novel_class_selected, n_way,
-                                                k_shot)
+
         all_base_class_selected.extend(novel_class_selected)
         novel_class_left = list(set(novel_class_left) - set(novel_class_selected))
+        incremental_adj = get_incremental_adj(adj.coalesce(), all_base_class_selected, novel_id_support, novel_id_query, labels)
+        acc_test, f1_test = incremental_train(incremental_adj, base_id_query, novel_id_query,
+                                                novel_id_support, base_class_selected, novel_class_selected, n_way, k_shot)
+
         meta_test_acc.append(acc_test)
         meta_test_f1.append(f1_test)
         print("Meta test_Accuracy: {}, Meta test_F1: {}".format(np.array(meta_test_acc)[-1], np.array(meta_test_f1)[-1]))
         if len(novel_class_left) < n_way:
-            all_base_class_selected = deepcopy(base_id)
-            novel_class_left = deepcopy(novel_train_id)
-
-
-        if idx == 0:
-            embeddings = encoder(features, adj)
-            d = {}
-            d["x"] = embeddings
-            d["y"] = labels
-            d["novel_train"] = novel_train_id
-            d["novel_test"] = novel_class_selected
-            save_object(d, "./test1.pkl")
+            break
 
     print("Total time elapsed: {:.4f}s".format(time.time() - t_total))

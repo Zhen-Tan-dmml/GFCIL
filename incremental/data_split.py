@@ -8,9 +8,15 @@ from sklearn import preprocessing
 from sklearn.metrics import f1_score
 import pickle
 
-base_num_dic = {'Amazon_clothing': 20, 'reddit': 11, 'dblp': 37}  # num of classD
-pretrain_split_dict = {'train': 1000, 'dev': 100, 'test': 100} # num of nodes
-metatrain_split_dict = {'train': 0.5, 'dev': 0.1, 'test': 0.4}  # ratio of class
+base_num_dic = {'Amazon_clothing': 20, 'reddit': 11, 'dblp': 37}  # num of classes
+# pretrain_split_dict = {'train': 0.6, 'dev': 0.2, 'test': 0.2} # ratio of nodes
+# pretrain_split_dict = {'train': 240, 'dev': 50, 'test': 50}
+pretrain_split_dict = {'train': 400, 'dev': 50, 'test': 50}
+metatrain_split_dict = {   # num of classes
+    'Amazon_clothing': {'train': 30, 'test': 27},
+    'reddit': {'train': 10, 'test': 20},
+    'dblp': {'train': 50, 'test': 50}
+}
 
 
 def load_raw_data(dataset_source):
@@ -22,9 +28,9 @@ def load_raw_data(dataset_source):
         n1s.append(int(n1))
         n2s.append(int(n2))
 
-    num_nodes = max(max(n1s), max(n2s)) + 1
+    num_all_nodes = max(max(n1s), max(n2s)) + 1
     adj = sp.coo_matrix((np.ones(len(n1s)), (n1s, n2s)),
-                        shape=(num_nodes, num_nodes))
+                        shape=(num_all_nodes, num_all_nodes))
 
     data_train = sio.loadmat("../few_shot_data/{}_train.mat".format(dataset_source))
     # train_class = list(set(data_train["Label"].reshape((1, len(data_train["Label"])))[0]))
@@ -32,11 +38,11 @@ def load_raw_data(dataset_source):
     data_test = sio.loadmat("../few_shot_data/{}_test.mat".format(dataset_source))
     # class_list_test = list(set(data_test["Label"].reshape((1, len(data_test["Label"])))[0]))
 
-    labels = np.zeros((num_nodes, 1))
+    labels = np.zeros((num_all_nodes, 1))
     labels[data_train['Index']] = data_train["Label"]
     labels[data_test['Index']] = data_test["Label"]
 
-    features = np.zeros((num_nodes, data_train["Attributes"].shape[1]))
+    features = np.zeros((num_all_nodes, data_train["Attributes"].shape[1]))
     features[data_train['Index']] = data_train["Attributes"].toarray()
     features[data_test['Index']] = data_test["Attributes"].toarray()
 
@@ -61,7 +67,7 @@ def load_raw_data(dataset_source):
     features = torch.FloatTensor(features)
     labels = torch.LongTensor(np.where(labels)[1])
 
-    adj = sparse_mx_to_torch_sparse_tensor(adj)
+    adj = sparse_mx_to_torch_sparse_tensor(adj).coalesce()
 
     num_nodes = []
     for _, v in id_by_class.items():
@@ -73,7 +79,8 @@ def load_raw_data(dataset_source):
     base_id = [id_num_tuple[0] for id_num_tuple in large_res_idex]
     novel_id = list(set(all_id).difference(set(base_id)))
 
-    return adj, features, labels, degree, id_by_class, base_id, novel_id, num_nodes
+    print(len(id_by_class[base_id[-1]]))
+    return adj, features, labels, degree, id_by_class, base_id, novel_id, num_nodes, num_all_nodes
 
 
 def split_base_data(base_id, id_by_class, labels):
@@ -84,11 +91,12 @@ def split_base_data(base_id, id_by_class, labels):
     pretrain_idx = []
     predev_idx = []
     pretest_idx = []
+    random.shuffle(base_id)
 
     for cla in base_id:
         node_idx = id_by_class[cla]
         random.shuffle(node_idx)
-        pretrain_idx.extend(node_idx[:train_num])
+        pretrain_idx.extend(node_idx[: train_num])
         predev_idx.extend(node_idx[train_num: train_num + dev_num])
         pretest_idx.extend(node_idx[train_num + dev_num: train_num + dev_num + test_num])
 
@@ -104,16 +112,14 @@ def split_base_data(base_id, id_by_class, labels):
            base_test_label, base_train_id, base_dev_id, base_test_id
 
 
-def split_novel_data(novel_id):
+def split_novel_data(novel_id, dataset_source):
+    split_dict = metatrain_split_dict[dataset_source]
     random.shuffle(novel_id)
-    novel_class_num = len(novel_id)
-    metatrain_class_num = int(metatrain_split_dict['train'] * novel_class_num)
-    metadev_class_num = int(metatrain_split_dict['dev'] * novel_class_num)
+    metatrain_class_num = split_dict['train']
     novel_train_id = novel_id[: metatrain_class_num]
-    novel_dev_id = novel_id[metatrain_class_num: metatrain_class_num + metadev_class_num]
-    novel_test_id = novel_id[metatrain_class_num + metadev_class_num:]
+    novel_test_id = novel_id[metatrain_class_num:]
 
-    return novel_train_id, novel_dev_id, novel_test_id
+    return novel_train_id, novel_test_id
 
 
 def normalize(mx):
@@ -135,6 +141,48 @@ def normalize_adj(adj):
     d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
     return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
 
+
+def get_base_adj(adj, base_id, labels):
+    I = adj.indices()
+    V = adj.values()
+    dim_base = len(labels)
+
+    mask = []
+    for i in range(I.shape[1]):
+        if labels[I[0, i]] in base_id and labels[I[1, i]] in base_id:
+            mask.append(True)
+        else:
+            mask.append(False)
+    mask = torch.tensor(mask)
+
+    I_base = I[:, mask]
+    V_base = V[mask]
+
+    base_adj = torch.sparse_coo_tensor(I_base, V_base, (dim_base, dim_base)).coalesce()
+
+    return base_adj
+
+
+def get_incremental_adj(adj, base_id, novel_id_support, novel_id_query, labels):
+    I = adj.indices()
+    V = adj.values()
+    dim_base = len(labels)
+    novel_idx = np.append(novel_id_support, novel_id_query)
+
+    mask = []
+    for i in range(I.shape[1]):
+        if (labels[I[0, i]] in base_id and labels[I[1, i]] in base_id) or \
+                (I[0, i] in novel_idx and I[1, i] in novel_idx):
+            mask.append(True)
+        else:
+            mask.append(False)
+    mask = torch.tensor(mask)
+    I_incremental = I[:, mask]
+    V_incremental = V[mask]
+
+    incremental_adj = torch.sparse_coo_tensor(I_incremental, V_incremental, (dim_base, dim_base)).coalesce()
+
+    return incremental_adj
 
 def accuracy(output, labels):
     preds = output.max(1)[1].type_as(labels)
@@ -173,7 +221,7 @@ def task_generator(id_by_class, class_id, n_way, k_shot, m_query):
     return np.array(id_support), np.array(id_query), class_selected
 
 
-def incremental_task_generator(id_by_class, n_way, k_shot, m_query, base_id, novel_id, memory=None):
+def incremental_task_generator(id_by_class, n_way, k_shot, m_query, base_id, novel_id):
     # sample class indices
     base_class_selected = base_id
     novel_class_selected = random.sample(novel_id, n_way)
