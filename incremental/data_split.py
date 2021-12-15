@@ -79,7 +79,6 @@ def load_raw_data(dataset_source):
     base_id = [id_num_tuple[0] for id_num_tuple in large_res_idex]
     novel_id = list(set(all_id).difference(set(base_id)))
 
-    print(len(id_by_class[base_id[-1]]))
     return adj, features, labels, degree, id_by_class, base_id, novel_id, num_nodes, num_all_nodes
 
 
