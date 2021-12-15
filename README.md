@@ -1,4 +1,5 @@
 # Graph Few-shot Class-incremental Learning (Graph FCL)
+![Alt text](frame.png)
 ## Requirements
 `python==3.7.10`
 
