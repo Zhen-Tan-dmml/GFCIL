@@ -12,5 +12,6 @@
 `cd incremental`
 ### Pretrain
 `python pretrain.py --use_cuda --dataset Amazon_clothing` 
-### Meta-train and Evaluation
+### Meta-train and Evaluation 
 `python meta-train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --checkpoint 100 --way 3 --shot 5`
+You may need to change the pretraining checkpoint number according to your need.
