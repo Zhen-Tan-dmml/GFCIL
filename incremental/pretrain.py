@@ -81,7 +81,7 @@ classifier = Classifier(nhid=args.hidden, nclass=len(pretrain_id))
 optimizer_encoder = optim.Adam(encoder.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
-optimizer_classifier = optim.Adam(encoder.parameters(),
+optimizer_classifier = optim.Adam(classifier.parameters(),
                        lr=args.lr, weight_decay=args.weight_decay)
 
 if args.pretrain_model:
