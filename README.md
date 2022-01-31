@@ -16,4 +16,4 @@
 `python meta_train.py --use_cuda --dataset Amazon_clothing --episodes 1000 --incremental --checkpoint 100 --way 3` 
 
 
-You may need to change the pretraining checkpoint number according to your need.
+You may need to change the pretraining checkpoint number according to your need or result.
