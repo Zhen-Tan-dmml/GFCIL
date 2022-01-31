@@ -17,3 +17,11 @@
 
 
 You may need to change the pretraining checkpoint number according to your need or result.
+
+## Cite
+`@article{tan2021graph,
+  title={Graph Few-shot Class-incremental Learning},
+  author={Tan, Zhen and Ding, Kaize and Guo, Ruocheng and Liu, Huan},
+  journal={arXiv preprint arXiv:2112.12819},
+  year={2021}
+}`
