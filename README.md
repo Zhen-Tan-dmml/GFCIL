@@ -1,5 +1,6 @@
 # Graph Few-shot Class-incremental Learning (WSDM 2022)
 ![Alt text](frame.png)
+Paper is available [here](https://dl.acm.org/doi/10.1145/3488560.3498455).
 ## Requirements
 `python==3.7.10`
 
