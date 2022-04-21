@@ -21,10 +21,11 @@ You may need to change the pretraining checkpoint number according to your need 
 
 ## Citation
 ```
-@article{tan2021graph,
-  title={Graph Few-shot Class-incremental Learning},
+@inproceedings{tan2022graph,
+  title={Graph few-shot class-incremental learning},
   author={Tan, Zhen and Ding, Kaize and Guo, Ruocheng and Liu, Huan},
-  journal={arXiv preprint arXiv:2112.12819},
-  year={2021}
+  booktitle={Proceedings of the Fifteenth ACM International Conference on Web Search and Data Mining},
+  pages={987--996},
+  year={2022}
 }
 ```
